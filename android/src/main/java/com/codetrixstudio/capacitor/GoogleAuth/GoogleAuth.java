@@ -8,6 +8,8 @@ import android.os.Bundle;
 import android.util.Log;
 
 import androidx.activity.result.ActivityResult;
+import androidx.annotation.NonNull;
+
 
 import com.codetrixstudio.capacitor.GoogleAuth.capacitorgoogleauth.R;
 import com.getcapacitor.JSObject;
@@ -20,8 +22,10 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn;
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
 import com.google.android.gms.auth.api.signin.GoogleSignInClient;
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
+import com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes;
 import com.google.android.gms.common.api.ApiException;
 import com.google.android.gms.common.api.Scope;
+import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
 
 import org.json.JSONException;
@@ -138,23 +142,37 @@ public class GoogleAuth extends Plugin {
 
   @PluginMethod()
   public void refresh(final PluginCall call) {
-    GoogleSignInAccount account = GoogleSignIn.getLastSignedInAccount(getContext());
-    if (account == null) {
-      call.reject("User not logged in.");
-    } else {
+    // Lancer une tentative de connexion silencieuse
+    Task<GoogleSignInAccount> task = googleSignInClient.silentSignIn();
+    // Ajouter un écouteur pour gérer la complétion de la tâche
+    task.addOnCompleteListener(result -> {
       try {
-        JSONObject accessTokenObject = getAuthToken(account.getAccount(), true);
+        // Si la tâche est réussie, récupérer le compte
+        if (result.isSuccessful()) {
+          GoogleSignInAccount account = result.getResult();
+          extractAuthenticationFromAccount(account, call);
+        } else {
+          // Si la tâche a échoué, récupérer l'exception
+          Exception exception = result.getException();
 
-        JSObject authentication = new JSObject();
-        authentication.put("idToken", account.getIdToken());
-        authentication.put(FIELD_ACCESS_TOKEN, accessTokenObject.get(FIELD_ACCESS_TOKEN));
-        authentication.put("refreshToken", "");
-        call.resolve(authentication);
-      } catch(Exception e){
-        e.printStackTrace();
-        call.reject("Something went wrong while retrieving access token", e);
+          if(exception instanceof ApiException apiException) {
+            // Si l'exception indique que l'utilisateur doit se reconnecter, lancer une connexion normale
+            if (apiException.getStatusCode() == GoogleSignInStatusCodes.SIGN_IN_REQUIRED) {
+              signIn(call);
+            } else {
+              // Sinon, rejeter l'appel avec l'exception
+              call.reject("Something went wrong with silent sign in", apiException);
+            }
+          } else {
+            // Sinon, rejeter l'appel avec l'exception
+            call.reject("Something went wrong with silent sign in", exception);
+          }
+        }
+      } catch (Exception e) {
+        // Pour toute autre exception, rejeter l'appel avec l'exception
+        call.reject("An unexpected error occurred", e);
       }
-    }
+    });
   }
 
   @PluginMethod()
@@ -269,4 +287,26 @@ public class GoogleAuth extends Plugin {
   private void rejectWithNullClientError(final PluginCall call) {
     call.reject("Google services are not ready. Please call initialize() first");
   }
+
+    private void extractAuthenticationFromAccount(GoogleSignInAccount account, final PluginCall call) {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        executor.execute(() -> {
+            try {
+                JSONObject accessTokenObject = getAuthToken(account.getAccount(), true);
+
+                JSObject authentication = new JSObject();
+                authentication.put("idToken", account.getIdToken());
+                authentication.put(FIELD_ACCESS_TOKEN, accessTokenObject.get(FIELD_ACCESS_TOKEN));
+                authentication.put(FIELD_TOKEN_EXPIRES, accessTokenObject.get(FIELD_TOKEN_EXPIRES));
+                authentication.put(FIELD_TOKEN_EXPIRES_IN, accessTokenObject.get(FIELD_TOKEN_EXPIRES_IN));
+
+                call.resolve(authentication);
+
+            } catch (Exception e) {
+                e.printStackTrace();
+                call.reject("Unable extract authentication ");
+            }
+        });
+    }
+
 }

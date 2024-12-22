@@ -57,23 +57,15 @@ public class GoogleAuth extends Plugin {
 
   private GoogleSignInClient googleSignInClient;
 
-  @Override
-  public void load() {
-    String clientId = getConfig().getString("androidClientId",
-      getConfig().getString("clientId",
-        this.getContext().getString(R.string.server_client_id)));
-
-    boolean forceCodeForRefreshToken = getConfig().getBoolean("forceCodeForRefreshToken", false);
-
+  public void loadSignInClient (String clientId, boolean forceCodeForRefreshToken, String[] scopeArray) {
     GoogleSignInOptions.Builder googleSignInBuilder = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestIdToken(clientId)
-            .requestEmail();
+      .requestIdToken(clientId)
+      .requestEmail();
 
     if (forceCodeForRefreshToken) {
       googleSignInBuilder.requestServerAuthCode(clientId, true);
     }
 
-    String[] scopeArray = getConfig().getArray("scopes", new String[] {});
     Scope[] scopes = new Scope[scopeArray.length - 1];
     Scope firstScope = new Scope(scopeArray[0]);
     for (int i = 1; i < scopeArray.length; i++) {
@@ -85,8 +77,15 @@ public class GoogleAuth extends Plugin {
     googleSignInClient = GoogleSignIn.getClient(this.getContext(), googleSignInOptions);
   }
 
+  @Override
+  public void load() {}
+
   @PluginMethod()
   public void signIn(PluginCall call) {
+    if(googleSignInClient == null){
+      rejectWithNullClientError(call);
+      return;
+    }
     Intent signInIntent = googleSignInClient.getSignInIntent();
     startActivityForResult(call, signInIntent, "signInResult");
   }
@@ -101,8 +100,37 @@ public class GoogleAuth extends Plugin {
       GoogleSignInAccount account = completedTask.getResult(ApiException.class);
 
       // The accessToken is retrieved by executing a network request against the Google API, so it needs to run in a thread
-      extractUserFromAccount(account, call);
+      ExecutorService executor = Executors.newSingleThreadExecutor();
+      executor.execute(() -> {
+        try {
+          JSONObject accessTokenObject = getAuthToken(account.getAccount(), true);
 
+          JSObject authentication = new JSObject();
+          authentication.put("idToken", account.getIdToken());
+          authentication.put(FIELD_ACCESS_TOKEN, accessTokenObject.get(FIELD_ACCESS_TOKEN));
+          authentication.put(FIELD_TOKEN_EXPIRES, accessTokenObject.get(FIELD_TOKEN_EXPIRES));
+          authentication.put(FIELD_TOKEN_EXPIRES_IN, accessTokenObject.get(FIELD_TOKEN_EXPIRES_IN));
+
+          JSObject user = new JSObject();
+          user.put("serverAuthCode", account.getServerAuthCode());
+          user.put("idToken", account.getIdToken());
+          user.put("authentication", authentication);
+
+          user.put("name", account.getDisplayName());
+          // Deprecated: Use `user` instead of `displayName`
+          user.put("displayName", account.getDisplayName());
+          user.put("email", account.getEmail());
+          user.put("familyName", account.getFamilyName());
+          user.put("givenName", account.getGivenName());
+          user.put("id", account.getId());
+          user.put("imageUrl", account.getPhotoUrl());
+
+          call.resolve(user);
+        } catch (Exception e) {
+          e.printStackTrace();
+          call.reject("Something went wrong while retrieving access token", e);
+        }
+      });
     } catch (ApiException e) {
       if (SIGN_IN_CANCELLED == e.getStatusCode()) {
         call.reject("The user canceled the sign-in flow.", "" + e.getStatusCode());
@@ -149,6 +177,10 @@ public class GoogleAuth extends Plugin {
 
   @PluginMethod()
   public void signOut(final PluginCall call) {
+    if(googleSignInClient == null){
+      rejectWithNullClientError(call);
+      return;
+    }
     googleSignInClient.signOut()
       .addOnSuccessListener(getActivity(), new OnSuccessListener<Void>() {
         @Override
@@ -166,6 +198,31 @@ public class GoogleAuth extends Plugin {
 
   @PluginMethod()
   public void initialize(final PluginCall call) {
+    // get data from config
+    String configClientId = getConfig().getString("androidClientId",
+      getConfig().getString("clientId",
+        this.getContext().getString(R.string.server_client_id)));
+    boolean configForceCodeForRefreshToken = getConfig().getBoolean("forceCodeForRefreshToken", false);
+    // need to get this as string so as to standardize with data from plugin call
+    String configScopeArray = getConfig().getString("scopes", new String());
+
+    // get client id from plugin call, fallback to be client id from config
+    String clientId = call.getData().getString("clientId", configClientId);
+    // get forceCodeForRefreshToken from call, fallback to be from config
+    boolean forceCodeForRefreshToken = call.getData().getBoolean("grantOfflineAccess", configForceCodeForRefreshToken);
+    // get scopes from call, fallback to be from config
+    String scopesStr = call.getData().getString("scopes", configScopeArray);
+    // replace all the symbols from parsing array as string
+    // leaving only scopes delimited by commas
+    String replacedScopesStr = scopesStr
+      .replaceAll("[\"\\[\\] ]", "")
+      // this is for scopes that are in the form of a url
+      .replace("\\", "");
+
+    // scope to be in the form of an array
+    String[] scopeArray = replacedScopesStr.split(",");
+
+    loadSignInClient(clientId, forceCodeForRefreshToken, scopeArray);
     call.resolve();
   }
 
@@ -227,57 +284,29 @@ public class GoogleAuth extends Plugin {
     return sb.toString();
   }
 
-
-  private void extractUserFromAccount(GoogleSignInAccount account, final PluginCall call) {
-    ExecutorService executor = Executors.newSingleThreadExecutor();
-    JSObject user = new JSObject();
-    executor.execute(() -> {
-      try {
-        JSONObject accessTokenObject = getAuthToken(account.getAccount(), true);
-
-        JSObject authentication = new JSObject();
-        authentication.put("idToken", account.getIdToken());
-        authentication.put(FIELD_ACCESS_TOKEN, accessTokenObject.get(FIELD_ACCESS_TOKEN));
-        authentication.put(FIELD_TOKEN_EXPIRES, accessTokenObject.get(FIELD_TOKEN_EXPIRES));
-        authentication.put(FIELD_TOKEN_EXPIRES_IN, accessTokenObject.get(FIELD_TOKEN_EXPIRES_IN));
-
-        user.put("serverAuthCode", account.getServerAuthCode());
-        user.put("authentication", authentication);
-
-        user.put("name", account.getDisplayName());
-        // Deprecated: Use `user` instead of `displayName`
-        user.put("displayName", account.getDisplayName());
-        user.put("email", account.getEmail());
-        user.put("familyName", account.getFamilyName());
-        user.put("givenName", account.getGivenName());
-        user.put("id", account.getId());
-        user.put("imageUrl", account.getPhotoUrl());
-        call.resolve(user);
-      } catch (Exception e) {
-        e.printStackTrace();
-        call.reject("Unable to fetch access token ");
-      }
-    });
+  private void rejectWithNullClientError(final PluginCall call) {
+    call.reject("Google services are not ready. Please call initialize() first");
   }
 
-  private void extractAuthenticationFromAccount(GoogleSignInAccount account, final PluginCall call) {
-    ExecutorService executor = Executors.newSingleThreadExecutor();
-    executor.execute(() -> {
-      try {
-        JSONObject accessTokenObject = getAuthToken(account.getAccount(), true);
+    private void extractAuthenticationFromAccount(GoogleSignInAccount account, final PluginCall call) {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        executor.execute(() -> {
+            try {
+                JSONObject accessTokenObject = getAuthToken(account.getAccount(), true);
 
-        JSObject authentication = new JSObject();
-        authentication.put("idToken", account.getIdToken());
-        authentication.put(FIELD_ACCESS_TOKEN, accessTokenObject.get(FIELD_ACCESS_TOKEN));
-        authentication.put(FIELD_TOKEN_EXPIRES, accessTokenObject.get(FIELD_TOKEN_EXPIRES));
-        authentication.put(FIELD_TOKEN_EXPIRES_IN, accessTokenObject.get(FIELD_TOKEN_EXPIRES_IN));
+                JSObject authentication = new JSObject();
+                authentication.put("idToken", account.getIdToken());
+                authentication.put(FIELD_ACCESS_TOKEN, accessTokenObject.get(FIELD_ACCESS_TOKEN));
+                authentication.put(FIELD_TOKEN_EXPIRES, accessTokenObject.get(FIELD_TOKEN_EXPIRES));
+                authentication.put(FIELD_TOKEN_EXPIRES_IN, accessTokenObject.get(FIELD_TOKEN_EXPIRES_IN));
 
-        call.resolve(authentication);
+                call.resolve(authentication);
 
-      } catch (Exception e) {
-        e.printStackTrace();
-        call.reject("Unable extract authentication ");
-      }
-    });
-  }
+            } catch (Exception e) {
+                e.printStackTrace();
+                call.reject("Unable extract authentication ");
+            }
+        });
+    }
+
 }

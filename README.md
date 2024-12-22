@@ -1,6 +1,9 @@
+> [!WARNING]
+> This plugin is now in low maintainance mode, for new feature like Credential manager or Privacy manifest please use: https://github.com/Cap-go/capacitor-social-login
+
 <h1 align="center">CapacitorGoogleAuth</h1>
 <p align="center"><strong><code>@codetrix-studio/capacitor-google-auth</code></strong></p>
-<p align="center"><strong>CAPACITOR 5</strong></p>
+<p align="center"><strong>CAPACITOR 6</strong></p>
 <p align="center">
 Capacitor plugin for Google Auth.
 </p>
@@ -8,6 +11,10 @@ Capacitor plugin for Google Auth.
 <p align="center">
 <a href="https://www.npmjs.com/package/@codetrix-studio/capacitor-google-auth"><img alt="npm" src="https://img.shields.io/npm/v/@codetrix-studio/capacitor-google-auth"></a> <a href="https://www.npmjs.com/package/@codetrix-studio/capacitor-google-auth"><img alt="npm" src="https://img.shields.io/npm/dt/@codetrix-studio/capacitor-google-auth"></a> <a href="https://www.npmjs.com/package/@codetrix-studio/capacitor-google-auth"><img alt="npm" src="https://img.shields.io/npm/dw/@codetrix-studio/capacitor-google-auth"></a> <a href="https://libraries.io/npm/@codetrix-studio%2Fcapacitor-google-auth"><img alt="Dependents (via libraries.io)" src="https://img.shields.io/librariesio/dependents/npm/@codetrix-studio/capacitor-google-auth"></a> <a href="https://packagephobia.com/result?p=@codetrix-studio/capacitor-google-auth"><img alt="install size" src="https://packagephobia.com/badge?p=@codetrix-studio/capacitor-google-auth"></a>
 </p>
+
+## Breaking change in V6
+
+In the v6 version, `clientId` in the initialize method is used in priority over other places you could set up. If before you were using this only on the web, unset it on mobile. Or set it conditionally to replicate old behavior.
 
 ## Contributions
 
@@ -99,14 +106,20 @@ initializeApp() {
 sign in function
 
 ```ts
+import { GoogleAuth } from "@codetrix-studio/capacitor-google-auth";
+import { Auth, GoogleAuthProvider, signInWithCredential } from '@angular/fire/auth';
+
 async googleSignIn() {
   let googleUser = await GoogleAuth.signIn();
 
   /*
     If you use Firebase you can forward and use the logged in Google user like this:
   */
-  const credential = auth.GoogleAuthProvider.credential(googleUser.authentication.idToken);
-  return this.afAuth.auth.signInAndRetrieveDataWithCredential(credential);
+  constructor(private auth: Auth){}
+
+  const googleUser = await GoogleAuth.signIn();
+  const _credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
+  return signInWithCredential(this.auth, _credential);
 }
 ```
 
@@ -137,32 +150,29 @@ or see more [CapacitorGoogleAuth-Vue3-example](https://github.com/reslear/Capaci
 2. Add **identifier** `REVERSED_CLIENT_ID` as **URL schemes** to `Info.plist` from **iOS URL scheme**<br>
    (Xcode: App - Targets/App - Info - URL Types, click plus icon)
 
-3. Set **Client ID** one of the ways:
-   1. Set in `capacitor.config.json`
-      - `iosClientId` - specific key for iOS
-      - `clientId` - or common key for Android and iOS
-   2. Download `GoogleService-Info.plist` file with `CLIENT_ID` and copy to **ios/App/App** necessarily through Xcode for indexing.
-
-plugin first use `iosClientId` if not found use `clientId` if not found use value `CLIENT_ID` from file `GoogleService-Info.plist`
+3. Set **Client ID** one of the ways (by order of importance in the plugin):
+   1. Set `clientId` in initialize method
+   2. Set `iosClientId` in `capacitor.config.json`
+   3. Set `clientId` in `capacitor.config.json`
+   4. Set `CLIENT_ID` in `GoogleService-Info.plist`
 
 ### Android
 
-Set **Client ID** :
-
-1. In `capacitor.config.json`
-
-   - `androidClientId` - specific key for Android
-   - `clientId` - or common key for Android and iOS
-
-2. or set inside your `strings.xml`
-
-plugin first use `androidClientId` if not found use `clientId` if not found use value `server_client_id` from file `strings.xml`
+Set **Client ID** (by order of importance in the plugin):
+1. Set `clientId` in initialize method
+2. Set `androidClientId` in `capacitor.config.json`
+3. Set `clientId` in `capacitor.config.json`
+4. Set `server_client_id` in `strings.xml`
 
 ```xml
 <resources>
   <string name="server_client_id">Your Web Client Key</string>
 </resources>
 ```
+
+Changing Play Services Auth version (Optional) :
+
+This plugin uses `com.google.android.gms:play-services-auth:21.2.0` by default, you can override it providing `gmsPlayServicesAuthVersion` at `variables.gradle`
 
 **Refresh method**
 
@@ -225,6 +235,113 @@ const config: CapacitorConfig = {
 
 export default config;
 ```
+#### Note: scopes can be configured under <code><a href="#initialize">initialize</a></code> function.
+
+## API
+
+<docgen-index>
+
+* [`initialize(...)`](#initialize)
+* [`signIn()`](#signin)
+* [`refresh()`](#refresh)
+* [`signOut()`](#signout)
+* [Interfaces](#interfaces)
+
+</docgen-index>
+<docgen-api>
+<!--Update the source file JSDoc comments and rerun docgen to update the docs below-->
+
+### initialize(...)
+
+```typescript
+initialize(options?: InitOptions) => void
+```
+
+Initializes the GoogleAuthPlugin, loading the gapi library and setting up the plugin.
+
+| Param         | Type                                                | Description                        |
+| ------------- | --------------------------------------------------- | ---------------------------------- |
+| **`options`** | <code><a href="#initoptions">InitOptions</a></code> | - Optional initialization options. |
+
+**Since:** 3.1.0
+
+--------------------
+
+
+### signIn()
+
+```typescript
+signIn() => Promise<User>
+```
+
+Initiates the sign-in process and returns a Promise that resolves with the user information.
+
+**Returns:** <code>Promise&lt;<a href="#user">User</a>&gt;</code>
+
+--------------------
+
+
+### refresh()
+
+```typescript
+refresh() => Promise<Authentication>
+```
+
+Refreshes the authentication token and returns a Promise that resolves with the updated authentication details.
+
+**Returns:** <code>Promise&lt;<a href="#authentication">Authentication</a>&gt;</code>
+
+--------------------
+
+
+### signOut()
+
+```typescript
+signOut() => Promise<any>
+```
+
+Signs out the user and returns a Promise.
+
+**Returns:** <code>Promise&lt;any&gt;</code>
+
+--------------------
+
+
+### Interfaces
+
+
+#### InitOptions
+
+| Prop                     | Type                  | Description                                                                                                                                      | Default            | Since      |
+| ------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------ | ---------- |
+| **`clientId`**           | <code>string</code>   | The app's client ID, found and created in the Google Developers Console. Common for Android or iOS. The default is defined in the configuration. |                    | 3.1.0      |
+| **`scopes`**             | <code>string[]</code> | Specifies the scopes required for accessing Google APIs The default is defined in the configuration.                                             |                    | 3.4.0-rc.4 |
+| **`grantOfflineAccess`** | <code>boolean</code>  | Set if your application needs to refresh access tokens when the user is not present at the browser. In response use `serverAuthCode` key         | <code>false</code> | 3.1.0      |
+
+
+#### User
+
+| Prop                 | Type                                                      | Description                                                         |
+| -------------------- | --------------------------------------------------------- | ------------------------------------------------------------------- |
+| **`id`**             | <code>string</code>                                       | The unique identifier for the user.                                 |
+| **`email`**          | <code>string</code>                                       | The email address associated with the user.                         |
+| **`name`**           | <code>string</code>                                       | The user's full name.                                               |
+| **`familyName`**     | <code>string</code>                                       | The family name (last name) of the user.                            |
+| **`givenName`**      | <code>string</code>                                       | The given name (first name) of the user.                            |
+| **`imageUrl`**       | <code>string</code>                                       | The URL of the user's profile picture.                              |
+| **`serverAuthCode`** | <code>string</code>                                       | The server authentication code.                                     |
+| **`authentication`** | <code><a href="#authentication">Authentication</a></code> | The authentication details including access, refresh and ID tokens. |
+
+
+#### Authentication
+
+| Prop               | Type                | Description                                      |
+| ------------------ | ------------------- | ------------------------------------------------ |
+| **`accessToken`**  | <code>string</code> | The access token obtained during authentication. |
+| **`idToken`**      | <code>string</code> | The ID token obtained during authentication.     |
+| **`refreshToken`** | <code>string</code> | The refresh token.                               |
+
+</docgen-api>
 
 ## API
 
@@ -333,6 +450,16 @@ Signs out the user and returns a Promise.
 </docgen-api>
 
 ## Migration guide
+
+#### Migrate from 3.3.x to 3.4.x
+
+Install version 3.4.x:
+
+```sh
+npm i --save @codetrix-studio/capacitor-google-auth@^3.4
+```
+
+Follow instruction for you project [Updating to Capacitor 6](https://capacitorjs.com/docs/next/updating/6-0).
 
 #### Migrate from 3.2.x to 3.3.x
 
